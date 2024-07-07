@@ -1,8 +1,11 @@
 #include "Adafruit_MCP9601.h"
+#include "WiFi.h"
 #include <SPI.h>
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SH110X.h>
+#include <Adafruit_NeoPixel.h>
+
 
 Adafruit_SH1107 display = Adafruit_SH1107(64, 128, &Wire1);
 
@@ -34,18 +37,68 @@ Adafruit_SH1107 display = Adafruit_SH1107(64, 128, &Wire1);
 // #endif
 
 
-
-
-
 #define I2C_ADDRESS (0x67)
+
+#define NUMPIXELS        1
+
+Adafruit_NeoPixel pixels(NUMPIXELS, PIN_NEOPIXEL, NEO_GRB + NEO_KHZ800);
 
 Adafruit_MCP9601 mcp;
 
+
+void initLED() {
+
+#if defined(NEOPIXEL_POWER)
+  // If this board has a power control pin, we must set it to output and high
+  // in order to enable the NeoPixels. We put this in an #if defined so it can
+  // be reused for other boards without compilation errors
+  pinMode(NEOPIXEL_POWER, OUTPUT);
+  digitalWrite(NEOPIXEL_POWER, HIGH);
+#endif
+
+  pixels.begin(); // INITIALIZE NeoPixel strip object (REQUIRED)
+  pixels.setBrightness(20); // not so bright
+}
+
+void setLED(uint8_t r, uint8_t g, uint8_t b) {
+  pixels.setPixelColor(0, pixels.Color(r, g, b));
+  pixels.show();
+}
+
+void blueLED() {
+  setLED(0, 0, 255);
+}
+
+void greenLED() {
+  setLED(0, 255, 0);
+}
+
+void redLED() {
+  setLED(255, 0, 0);
+}
+
+void offLED() {
+  setLED(0, 0, 0);
+}
+
+void magentaLED () {
+  setLED(255, 0, 255);
+}
+
+void cyanLED() {
+  setLED(0, 255, 255);
+}
+
 void setup() {
   Serial.begin(115200);
-  while (!Serial) {
-    delay(10);
-  }
+  
+  initLED();
+  cyanLED();
+
+  WiFi.mode(WIFI_STA);
+  WiFi.disconnect();
+
+  magentaLED();
 
   Serial.println("128x64 OLED FeatherWing test");
   delay(250); // wait for the OLED to power up
@@ -74,17 +127,14 @@ void setup() {
   display.setTextSize(1);
   display.setTextColor(SH110X_WHITE);
   display.setCursor(0,0);
-  display.print("Connecting to SSID\n'adafruit':");
-  display.print("connected!");
-  display.println("IP: 10.0.1.23");
-  display.println("Sending val #0");
+  display.println("ayyyyyy");
   display.display(); // actually display all of the above
 
-  Serial.println("Adafruit MCP9601 test");
 
   /* Initialise the driver with I2C_ADDRESS and the default I2C bus. */
   if (! mcp.begin(I2C_ADDRESS, &Wire1)) {
       Serial.println("Sensor not found. Check wiring!");
+      redLED();
       while (1);
   }
 
@@ -125,7 +175,54 @@ void setup() {
 
   mcp.enable(true);
 
+  greenLED();
+
 }
+
+void scanWIFI() {
+  
+  // WiFi.scanNetworks will return the number of networks found.
+  int n = WiFi.scanNetworks();
+  Serial.println("Scan done");
+  if (n == 0) {
+    Serial.println("no networks found");
+  } else {
+    Serial.print(n);
+    Serial.println(" networks found");
+    Serial.println("Nr | SSID                             | RSSI | CH | Encryption");
+    for (int i = 0; i < n; ++i) {
+      // Print SSID and RSSI for each network found
+      Serial.printf("%2d", i + 1);
+      Serial.print(" | ");
+      Serial.printf("%-32.32s", WiFi.SSID(i).c_str());
+      Serial.print(" | ");
+      Serial.printf("%4ld", WiFi.RSSI(i));
+      Serial.print(" | ");
+      Serial.printf("%2ld", WiFi.channel(i));
+      Serial.print(" | ");
+      switch (WiFi.encryptionType(i)) {
+        case WIFI_AUTH_OPEN:            Serial.print("open"); break;
+        case WIFI_AUTH_WEP:             Serial.print("WEP"); break;
+        case WIFI_AUTH_WPA_PSK:         Serial.print("WPA"); break;
+        case WIFI_AUTH_WPA2_PSK:        Serial.print("WPA2"); break;
+        case WIFI_AUTH_WPA_WPA2_PSK:    Serial.print("WPA+WPA2"); break;
+        case WIFI_AUTH_WPA2_ENTERPRISE: Serial.print("WPA2-EAP"); break;
+        case WIFI_AUTH_WPA3_PSK:        Serial.print("WPA3"); break;
+        case WIFI_AUTH_WPA2_WPA3_PSK:   Serial.print("WPA2+WPA3"); break;
+        case WIFI_AUTH_WAPI_PSK:        Serial.print("WAPI"); break;
+        default:                        Serial.print("unknown");
+      }
+      Serial.println();
+      delay(10);
+    }
+  }
+  Serial.println("");
+
+  // Delete the scan result to free memory for code below.
+  WiFi.scanDelete();
+}
+
+int scanned = 0;
 
 void loop()
 {
@@ -168,5 +265,8 @@ void loop()
   display.println(temp);
   display.display(); // actually display all of the above
 
-
+  if (scanned == 0) {
+    scanWIFI();
+    scanned = 1;
+  }
 }
