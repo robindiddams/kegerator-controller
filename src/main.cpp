@@ -5,7 +5,222 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SH110X.h>
 #include <Adafruit_NeoPixel.h>
+#include <WiFi.h>
+#include <WiFiMulti.h>
+#include <HTTPClient.h>
+#include "./wifi-creds.h"
 
+// wifi stuff
+
+extern const uint8_t root_ca_pem_start[] asm("_binary_src_root_ca_pem_start");
+extern const uint8_t root_ca_pem_end[] asm("_binary_src_root_ca_pem_end");
+
+char *getRootCA()
+{
+  return (char *)root_ca_pem_start;
+}
+
+// Not sure if NetworkClientSecure checks the validity date of the certificate.
+// Setting clock just to be sure...
+void setClock()
+{
+  configTime(0, 0, "pool.ntp.org");
+
+  Serial.print(F("Waiting for NTP time sync: "));
+  time_t nowSecs = time(nullptr);
+  while (nowSecs < 8 * 3600 * 2)
+  {
+    delay(500);
+    Serial.print(F("."));
+    yield();
+    nowSecs = time(nullptr);
+  }
+
+  Serial.println();
+  struct tm timeinfo;
+  gmtime_r(&nowSecs, &timeinfo);
+  Serial.print(F("Current time: "));
+  Serial.print(asctime(&timeinfo));
+}
+
+WiFiMulti wifiMulti;
+
+void connectWIFI()
+{
+  // get creds, split by newline and assign to ssid and password
+
+  Serial.print("Connecting to ");
+  Serial.println(WIFI_SSID);
+  Serial.print("Password: ");
+  Serial.println(WIFI_PASS);
+
+  delay(1000);
+
+  // WiFi.mode(WIFI_STA);
+
+  wifiMulti.addAP(WIFI_SSID, WIFI_PASS);
+
+  // wait for WiFi connection
+  Serial.print("Waiting for WiFi to connect...");
+  while ((wifiMulti.run() != WL_CONNECTED))
+  {
+    Serial.print(".");
+  }
+  Serial.println(" connected");
+
+  setClock();
+}
+
+bool postTemperature()
+{
+  if ((wifiMulti.run() == WL_CONNECTED))
+  {
+
+    HTTPClient http;
+
+    Serial.print("[HTTP] begin...\n");
+    // configure traged server and url
+    char *ca = getRootCA();
+    http.begin("https://www.howsmyssl.com/a/check", ca); // HTTPS
+    // http.begin("http://httpbin.net/ip"); // HTTP
+
+    Serial.print("[HTTP] GET...\n");
+    // start connection and send HTTP header
+    int httpCode = http.GET();
+
+    // httpCode will be negative on error
+    if (httpCode > 0)
+    {
+      // HTTP header has been send and Server response header has been handled
+      Serial.printf("[HTTP] GET... code: %d\n", httpCode);
+
+      // file found at server
+      if (httpCode == HTTP_CODE_OK)
+      {
+        String payload = http.getString();
+        Serial.println(payload);
+      }
+    }
+    else
+    {
+      Serial.printf("[HTTP] GET... failed, error: %s\n", http.errorToString(httpCode).c_str());
+    }
+
+    http.end();
+  }
+  return false;
+}
+
+// Temp senseor stuff
+
+#define TEMP_SENSOR_I2C_ADDRESS (0x67)
+
+Adafruit_MCP9601 mcp;
+
+float readTemperature()
+{
+  uint8_t status = mcp.getStatus();
+  Serial.print("MCP Status: 0x");
+  Serial.print(status, HEX);
+  Serial.print(": ");
+  if (status & MCP9601_STATUS_OPENCIRCUIT)
+  {
+    Serial.println("Thermocouple open!");
+    return 0.0; // don't continue, since there's no thermocouple
+  }
+  if (status & MCP9601_STATUS_SHORTCIRCUIT)
+  {
+    Serial.println("Thermocouple shorted to ground!");
+    return 0.0; // don't continue, since the sensor is not working
+  }
+  if (status & MCP960X_STATUS_ALERT1)
+  {
+    Serial.print("Alert 1, ");
+  }
+  if (status & MCP960X_STATUS_ALERT2)
+  {
+    Serial.print("Alert 2, ");
+  }
+  if (status & MCP960X_STATUS_ALERT3)
+  {
+    Serial.print("Alert 3, ");
+  }
+  if (status & MCP960X_STATUS_ALERT4)
+  {
+    Serial.print("Alert 4, ");
+  }
+  Serial.println();
+
+  float temp = mcp.readThermocouple();
+  Serial.print("Hot Junction: ");
+  Serial.println(temp);
+  Serial.print("Cold Junction: ");
+  Serial.println(mcp.readAmbient());
+  Serial.print("ADC: ");
+  Serial.print(mcp.readADC() * 2);
+  Serial.println(" uV");
+
+  return temp;
+}
+
+// NEOPixel stuff
+
+#define NUMPIXELS 1
+
+Adafruit_NeoPixel pixels(NUMPIXELS, PIN_NEOPIXEL, NEO_GRB + NEO_KHZ800);
+
+void initLED()
+{
+
+#if defined(NEOPIXEL_POWER)
+  // If this board has a power control pin, we must set it to output and high
+  // in order to enable the NeoPixels. We put this in an #if defined so it can
+  // be reused for other boards without compilation errors
+  pinMode(NEOPIXEL_POWER, OUTPUT);
+  digitalWrite(NEOPIXEL_POWER, HIGH);
+#endif
+
+  pixels.begin();           // INITIALIZE NeoPixel strip object (REQUIRED)
+  pixels.setBrightness(20); // not so bright
+}
+
+void setLED(uint8_t r, uint8_t g, uint8_t b)
+{
+  pixels.setPixelColor(0, pixels.Color(r, g, b));
+  pixels.show();
+}
+
+void blueLED()
+{
+  setLED(0, 0, 255);
+}
+
+void greenLED()
+{
+  setLED(0, 255, 0);
+}
+
+void redLED()
+{
+  setLED(255, 0, 0);
+}
+
+void offLED()
+{
+  setLED(0, 0, 0);
+}
+
+void magentaLED()
+{
+  setLED(255, 0, 255);
+}
+
+void cyanLED()
+{
+  setLED(0, 255, 255);
+}
+
+// oled stuff
 
 Adafruit_SH1107 display = Adafruit_SH1107(64, 128, &Wire1);
 
@@ -36,72 +251,26 @@ Adafruit_SH1107 display = Adafruit_SH1107(64, 128, &Wire1);
 //   #define BUTTON_C  5
 // #endif
 
-
-#define I2C_ADDRESS (0x67)
-
-#define NUMPIXELS        1
-
-Adafruit_NeoPixel pixels(NUMPIXELS, PIN_NEOPIXEL, NEO_GRB + NEO_KHZ800);
-
-Adafruit_MCP9601 mcp;
-
-
-void initLED() {
-
-#if defined(NEOPIXEL_POWER)
-  // If this board has a power control pin, we must set it to output and high
-  // in order to enable the NeoPixels. We put this in an #if defined so it can
-  // be reused for other boards without compilation errors
-  pinMode(NEOPIXEL_POWER, OUTPUT);
-  digitalWrite(NEOPIXEL_POWER, HIGH);
-#endif
-
-  pixels.begin(); // INITIALIZE NeoPixel strip object (REQUIRED)
-  pixels.setBrightness(20); // not so bright
-}
-
-void setLED(uint8_t r, uint8_t g, uint8_t b) {
-  pixels.setPixelColor(0, pixels.Color(r, g, b));
-  pixels.show();
-}
-
-void blueLED() {
-  setLED(0, 0, 255);
-}
-
-void greenLED() {
-  setLED(0, 255, 0);
-}
-
-void redLED() {
-  setLED(255, 0, 0);
-}
-
-void offLED() {
-  setLED(0, 0, 0);
-}
-
-void magentaLED () {
-  setLED(255, 0, 255);
-}
-
-void cyanLED() {
-  setLED(0, 255, 255);
-}
-
-void setup() {
+void setup()
+{
   Serial.begin(115200);
-  
+  delay(1000);
+
   initLED();
   cyanLED();
 
-  WiFi.mode(WIFI_STA);
-  WiFi.disconnect();
+  Serial.println("Starting WiFi...");
+
+  delay(1000);
+
+  // WiFi.mode(WIFI_STA);
+  // WiFi.disconnect();
+  connectWIFI();
 
   magentaLED();
 
   Serial.println("128x64 OLED FeatherWing test");
-  delay(250); // wait for the OLED to power up
+  delay(250);                // wait for the OLED to power up
   display.begin(0x3C, true); // Address 0x3C default
 
   Serial.println("OLED begun");
@@ -126,16 +295,17 @@ void setup() {
   // text display tests
   display.setTextSize(1);
   display.setTextColor(SH110X_WHITE);
-  display.setCursor(0,0);
+  display.setCursor(0, 0);
   display.println("ayyyyyy");
   display.display(); // actually display all of the above
 
-
-  /* Initialise the driver with I2C_ADDRESS and the default I2C bus. */
-  if (! mcp.begin(I2C_ADDRESS, &Wire1)) {
-      Serial.println("Sensor not found. Check wiring!");
-      redLED();
-      while (1);
+  /* Initialise the driver with TEMP_SENSOR_I2C_ADDRESS and the default I2C bus. */
+  if (!mcp.begin(TEMP_SENSOR_I2C_ADDRESS, &Wire1))
+  {
+    Serial.println("Sensor not found. Check wiring!");
+    redLED();
+    while (1)
+      ;
   }
 
   Serial.println("Found MCP9601!");
@@ -176,21 +346,25 @@ void setup() {
   mcp.enable(true);
 
   greenLED();
-
 }
 
-void scanWIFI() {
-  
+void scanWIFI()
+{
+
   // WiFi.scanNetworks will return the number of networks found.
   int n = WiFi.scanNetworks();
   Serial.println("Scan done");
-  if (n == 0) {
+  if (n == 0)
+  {
     Serial.println("no networks found");
-  } else {
+  }
+  else
+  {
     Serial.print(n);
     Serial.println(" networks found");
     Serial.println("Nr | SSID                             | RSSI | CH | Encryption");
-    for (int i = 0; i < n; ++i) {
+    for (int i = 0; i < n; ++i)
+    {
       // Print SSID and RSSI for each network found
       Serial.printf("%2d", i + 1);
       Serial.print(" | ");
@@ -200,17 +374,37 @@ void scanWIFI() {
       Serial.print(" | ");
       Serial.printf("%2ld", WiFi.channel(i));
       Serial.print(" | ");
-      switch (WiFi.encryptionType(i)) {
-        case WIFI_AUTH_OPEN:            Serial.print("open"); break;
-        case WIFI_AUTH_WEP:             Serial.print("WEP"); break;
-        case WIFI_AUTH_WPA_PSK:         Serial.print("WPA"); break;
-        case WIFI_AUTH_WPA2_PSK:        Serial.print("WPA2"); break;
-        case WIFI_AUTH_WPA_WPA2_PSK:    Serial.print("WPA+WPA2"); break;
-        case WIFI_AUTH_WPA2_ENTERPRISE: Serial.print("WPA2-EAP"); break;
-        case WIFI_AUTH_WPA3_PSK:        Serial.print("WPA3"); break;
-        case WIFI_AUTH_WPA2_WPA3_PSK:   Serial.print("WPA2+WPA3"); break;
-        case WIFI_AUTH_WAPI_PSK:        Serial.print("WAPI"); break;
-        default:                        Serial.print("unknown");
+      switch (WiFi.encryptionType(i))
+      {
+      case WIFI_AUTH_OPEN:
+        Serial.print("open");
+        break;
+      case WIFI_AUTH_WEP:
+        Serial.print("WEP");
+        break;
+      case WIFI_AUTH_WPA_PSK:
+        Serial.print("WPA");
+        break;
+      case WIFI_AUTH_WPA2_PSK:
+        Serial.print("WPA2");
+        break;
+      case WIFI_AUTH_WPA_WPA2_PSK:
+        Serial.print("WPA+WPA2");
+        break;
+      case WIFI_AUTH_WPA2_ENTERPRISE:
+        Serial.print("WPA2-EAP");
+        break;
+      case WIFI_AUTH_WPA3_PSK:
+        Serial.print("WPA3");
+        break;
+      case WIFI_AUTH_WPA2_WPA3_PSK:
+        Serial.print("WPA2+WPA3");
+        break;
+      case WIFI_AUTH_WAPI_PSK:
+        Serial.print("WAPI");
+        break;
+      default:
+        Serial.print("unknown");
       }
       Serial.println();
       delay(10);
@@ -226,32 +420,8 @@ int scanned = 0;
 
 void loop()
 {
-  uint8_t status = mcp.getStatus();
-  Serial.print("MCP Status: 0x"); 
-  Serial.print(status, HEX);  
-  Serial.print(": ");
-  if (status & MCP9601_STATUS_OPENCIRCUIT) { 
-    Serial.println("Thermocouple open!"); 
-    return; // don't continue, since there's no thermocouple
-  }
-  if (status & MCP9601_STATUS_SHORTCIRCUIT) { 
-    Serial.println("Thermocouple shorted to ground!"); 
-    return; // don't continue, since the sensor is not working
-  }
-  if (status & MCP960X_STATUS_ALERT1) { Serial.print("Alert 1, "); }
-  if (status & MCP960X_STATUS_ALERT2) { Serial.print("Alert 2, "); }
-  if (status & MCP960X_STATUS_ALERT3) { Serial.print("Alert 3, "); }
-  if (status & MCP960X_STATUS_ALERT4) { Serial.print("Alert 4, "); }
-  Serial.println();
-  
-  float temp = mcp.readThermocouple();
-  Serial.print("Hot Junction: "); Serial.println(temp);
-  Serial.print("Cold Junction: "); Serial.println(mcp.readAmbient());
-  Serial.print("ADC: "); Serial.print(mcp.readADC() * 2); Serial.println(" uV");
 
-
-
-
+  float temp = readTemperature();
 
   delay(1000);
 
@@ -260,13 +430,10 @@ void loop()
   display.clearDisplay();
   display.setTextSize(2);
   display.setTextColor(SH110X_WHITE);
-  display.setCursor(0,0);
+  display.setCursor(0, 0);
   display.println("found the data:");
   display.println(temp);
   display.display(); // actually display all of the above
 
-  if (scanned == 0) {
-    scanWIFI();
-    scanned = 1;
-  }
+  postTemperature();
 }
