@@ -1,3 +1,4 @@
 .pio
 src/wifi-creds.h
 .vscode/
+.DS_Store
