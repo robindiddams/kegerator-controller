@@ -286,13 +286,11 @@ void setup()
   display.display();
 
   display.setRotation(1);
-  Serial.println("Button test");
 
   // pinMode(BUTTON_A, INPUT_PULLUP);
   // pinMode(BUTTON_B, INPUT_PULLUP);
   // pinMode(BUTTON_C, INPUT_PULLUP);
 
-  // text display tests
   display.setTextSize(1);
   display.setTextColor(SH110X_WHITE);
   display.setCursor(0, 0);
@@ -307,8 +305,10 @@ void setup()
     while (1)
       ;
   }
-
-  Serial.println("Found MCP9601!");
+  else
+  {
+    Serial.println("Found MCP9601!");
+  }
 
   // mcp.setADCresolution(MCP9600_ADCRESOLUTION_18);
   // Serial.print("ADC resolution set to ");
@@ -418,13 +418,21 @@ void scanWIFI()
 
 int scanned = 0;
 float prevTemp = 0.0;
+int counter = 0;
 
 void loop()
 {
+  delay(1000);
 
   float temp = readTemperature();
 
-  delay(1000);
+  if (temp == 0)
+  {
+    redLED();
+    return;
+  }
+
+  greenLED();
 
   display.clearDisplay();
   display.setTextSize(2);
@@ -434,13 +442,11 @@ void loop()
   display.println(temp);
   display.display(); // actually display all of the above
 
-  if (temp > prevTemp + 1.0 || temp < prevTemp - 1.0)
+  if (temp > prevTemp + 1.0 || temp < prevTemp - 1.0 && counter % 60 == 0)
   {
     Serial.println("Temperature changed by more than 1 degree");
     postTemperature(temp);
+    prevTemp = temp;
   }
-
-  prevTemp = temp;
-
-  yield();
+  counter++;
 }
